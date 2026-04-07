@@ -1,0 +1,148 @@
+const Joi = require("joi");
+
+// ── Reusable field schemas ───────────────────────────────────────────────────
+
+const passwordSchema = Joi.string()
+  .min(8)
+  .max(72)
+  .pattern(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*])/)
+  .messages({
+    "string.min": "รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร",
+    "string.max": "รหัสผ่านต้องไม่เกิน 72 ตัวอักษร",
+    "string.pattern.base":
+      "รหัสผ่านต้องมีตัวพิมพ์เล็ก ตัวพิมพ์ใหญ่ ตัวเลข และอักขระพิเศษ (!@#$%^&*)",
+  });
+
+const emailSchema = Joi.string().email().lowercase().trim().messages({
+  "string.email": "รูปแบบอีเมลไม่ถูกต้อง",
+  "any.required": "กรุณากรอกอีเมล",
+});
+
+// ── Validation Schemas ───────────────────────────────────────────────────────
+
+const registerSchema = Joi.object({
+  firstName: Joi.string().trim().min(2).max(50).required().messages({
+    "string.min": "ชื่อต้องมีอย่างน้อย 2 ตัวอักษร",
+    "any.required": "กรุณากรอกชื่อ",
+  }),
+  lastName: Joi.string().trim().min(2).max(50).required().messages({
+    "string.min": "นามสกุลต้องมีอย่างน้อย 2 ตัวอักษร",
+    "any.required": "กรุณากรอกนามสกุล",
+  }),
+  email: emailSchema.required(),
+  password: passwordSchema.required().messages({
+    "any.required": "กรุณากรอกรหัสผ่าน",
+  }),
+  confirmPassword: Joi.string().valid(Joi.ref("password")).required().messages({
+    "any.only": "รหัสผ่านไม่ตรงกัน",
+    "any.required": "กรุณายืนยันรหัสผ่าน",
+  }),
+  role: Joi.string().valid("buyer", "seller", "both").default("buyer"),
+  phone: Joi.string()
+    .pattern(/^(\+66|0)[0-9]{8,9}$/)
+    .optional()
+    .messages({
+      "string.pattern.base": "รูปแบบเบอร์โทรศัพท์ไม่ถูกต้อง",
+    }),
+  agreeToTerms: Joi.boolean().valid(true).required().messages({
+    "any.only": "กรุณายอมรับข้อตกลงการใช้งาน",
+    "any.required": "กรุณายอมรับข้อตกลงการใช้งาน",
+  }),
+});
+
+const loginSchema = Joi.object({
+  email: emailSchema.required(),
+  password: Joi.string().required().messages({
+    "any.required": "กรุณากรอกรหัสผ่าน",
+  }),
+  rememberMe: Joi.boolean().default(false),
+});
+
+const forgotPasswordSchema = Joi.object({
+  email: emailSchema.required(),
+});
+
+const resetPasswordSchema = Joi.object({
+  token: Joi.string().required().messages({
+    "any.required": "Token ไม่ถูกต้อง",
+  }),
+  newPassword: passwordSchema.required().messages({
+    "any.required": "กรุณากรอกรหัสผ่านใหม่",
+  }),
+  confirmPassword: Joi.string()
+    .valid(Joi.ref("newPassword"))
+    .required()
+    .messages({
+      "any.only": "รหัสผ่านไม่ตรงกัน",
+      "any.required": "กรุณายืนยันรหัสผ่านใหม่",
+    }),
+});
+
+const changePasswordSchema = Joi.object({
+  currentPassword: Joi.string().required().messages({
+    "any.required": "กรุณากรอกรหัสผ่านปัจจุบัน",
+  }),
+  newPassword: passwordSchema.required().messages({
+    "any.required": "กรุณากรอกรหัสผ่านใหม่",
+  }),
+  confirmPassword: Joi.string()
+    .valid(Joi.ref("newPassword"))
+    .required()
+    .messages({
+      "any.only": "รหัสผ่านไม่ตรงกัน",
+      "any.required": "กรุณายืนยันรหัสผ่านใหม่",
+    }),
+});
+
+const refreshTokenSchema = Joi.object({
+  refreshToken: Joi.string().required().messages({
+    "any.required": "Refresh token ไม่ถูกต้อง",
+  }),
+});
+
+const verifyEmailSchema = Joi.object({
+  token: Joi.string().required().messages({
+    "any.required": "Token ยืนยันอีเมลไม่ถูกต้อง",
+  }),
+});
+
+// ── Validator Helper ─────────────────────────────────────────────────────────
+
+/**
+ * สร้าง middleware สำหรับ validate request body ด้วย Joi schema
+ * @param {Joi.Schema} schema
+ * @returns {Function} Express middleware
+ */
+const validate = (schema) => (req, res, next) => {
+  const { error, value } = schema.validate(req.body, {
+    abortEarly: false,  // แสดง error ทุก field พร้อมกัน
+    stripUnknown: true, // ตัด field ที่ไม่อยู่ใน schema ออก
+  });
+
+  if (error) {
+    const errors = error.details.map((detail) => ({
+      field: detail.path.join("."),
+      message: detail.message,
+    }));
+    return res.status(422).json({
+      success: false,
+      message: "ข้อมูลไม่ถูกต้อง",
+      errors,
+    });
+  }
+
+  req.body = value; // ใช้ค่าที่ผ่าน sanitize แล้ว
+  next();
+};
+
+// ── Exports ──────────────────────────────────────────────────────────────────
+
+module.exports = {
+  validateRegister: validate(registerSchema),
+  validateLogin: validate(loginSchema),
+  validateForgotPassword: validate(forgotPasswordSchema),
+  validateResetPassword: validate(resetPasswordSchema),
+  validateChangePassword: validate(changePasswordSchema),
+  validateRefreshToken: validate(refreshTokenSchema),
+  validateVerifyEmail: validate(verifyEmailSchema),
+};
